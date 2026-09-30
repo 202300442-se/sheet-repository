@@ -24,9 +24,9 @@ KST = ZoneInfo("Asia/Seoul")
 HERE = Path(__file__).parent
 SAMPLE_CSV = HERE / "sample.csv"
 SITE_FILE = HERE / "site.json"
-REQUIRED = ("제목", "내용", "공개")
+REQUIRED = ("제목", "내용", "분류", "링크", "공개")
 OPTIONAL = ("분류", "링크")
-PUBLIC_VALUES = {"Y", "YES", "예", "O"}
+PUBLIC_VALUES = {"Y"}
 
 
 class DataError(ValueError):
@@ -70,13 +70,14 @@ def parse_rows(text):
     header = [name.strip() for name in reader.fieldnames]
     missing = [name for name in REQUIRED if name not in header]
     if missing:
-        raise DataError(f"필수 열이 없습니다: {', '.join(missing)} / 현재 열: {', '.join(header) or '(없음)'}")
+        raise DataError(f"1행(열 이름): 필수 열이 없습니다: {', '.join(missing)} / 현재 열: {', '.join(header) or '(없음)'}")
     items, hidden = [], 0
+    number = 1
     for number, row in enumerate(reader, start=2):
         row = {(key or "").strip(): (value or "").strip() for key, value in row.items() if key is not None}
         if not any(row.values()):
             continue
-        if row.get("공개", "").upper() not in PUBLIC_VALUES:
+        if row.get("공개", "") not in PUBLIC_VALUES:
             hidden += 1
             continue
         for name in ("제목", "내용"):
@@ -88,7 +89,8 @@ def parse_rows(text):
         items.append({"row": number, "title": row["제목"], "body": row["내용"],
                       "category": row.get("분류", "") or "기타", "link": link})
     if not items:
-        raise DataError("공개 열이 Y인 행이 없습니다. 웹에 보일 행의 공개 열에 Y를 적으세요.")
+        raise DataError(f"2~{number}행 검사: 공개 열이 Y인 행이 없습니다. "
+                        "데이터 행이 없는 경우 2행부터 내용을 입력하세요.")
     return items, hidden
 
 
@@ -243,6 +245,8 @@ def main(argv=None):
     source = args.csv or os.environ.get("SHEET_CSV_URL", "").strip() or str(SAMPLE_CSV)
     source_label = "구글 시트(웹에 게시한 CSV)" if re.match(r"https?://", source) else f"로컬 파일 {Path(source).name}"
     try:
+        if os.environ.get("GITHUB_ACTIONS") == "true" and not args.csv and not os.environ.get("SHEET_CSV_URL", "").strip():
+            raise DataError("설정 오류: SHEET_CSV_URL이 비어 있습니다. 저장소 Variables에 게시 CSV 주소를 등록하세요. (행 번호: 데이터 읽기 전)")
         generated_at = datetime.now(KST)
         target_date = args.date or generated_at.date()
         site = load_site()
